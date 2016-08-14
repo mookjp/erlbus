@@ -55,7 +55,13 @@
 
 -spec start_link(atom(), [term()]) -> supervisor:startlink_ret().
 start_link(Name, Opts) ->
+  %% `ebus_common:build_name(List, Separator)`はリストをSeparatorで区切って
+  %% atomとして返す
+  %% Nameがebus_psなのでsup_ebus_psというatomが返る
   SupName = ebus_common:build_name([Name, <<"sup">>], <<"_">>),
+  %% start_link(SupName, Mdule, Args)
+  %% ArgsはModuleの`init/1`に渡すパラメータ
+  %% この場合はsup_ebus_psがSupName, Nameがebus_ps
   supervisor:start_link({local, SupName}, ?MODULE, [Name, Opts]).
 
 %%%===================================================================
@@ -68,10 +74,15 @@ init([Server, Opts]) ->
   DispatchRules = [{broadcast, ebus_ps_pg2_server, [Server, PoolSize]}],
 
   Children = [
+    %% supervisor用のspecを返すutil
+    %% ebus_ps_local_supはebus_psを子プロセスとして起動
     ebus_supervisor_spec:supervisor(
       ebus_ps_local_sup, [Server, PoolSize, DispatchRules]
     ),
+    %% worker用のspecを返すutil
+    %% ebus_ps_pg2_serverを起動
     ebus_supervisor_spec:worker(ebus_ps_pg2_server, [Server])
   ],
 
+  %% strategyを作成
   ebus_supervisor_spec:supervise(Children, #{strategy => rest_for_one}).

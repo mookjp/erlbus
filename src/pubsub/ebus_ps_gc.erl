@@ -80,9 +80,11 @@ unsubscribe(Pid, Topic, TopicsTable, PidsTable) ->
 
 %% @hidden
 init([ServerName, LocalName]) ->
+  %% ServerNameは`ebus_ps_gc_1`のような形式, LocalNameは`ebus_ps_local_1`のような形式
   {ok, #{topics => LocalName, pids => ServerName}}.
 
 %% @hidden
+%% ebus_ps_localからgen_server:callされる
 handle_call({subscription, Pid}, _From, #{pids := Pids} = State) ->
   try
     {reply, ets:lookup_element(Pids, Pid, 2), State}
@@ -93,12 +95,21 @@ handle_call(_Request, _From, State) ->
   {reply, ok, State}.
 
 %% @hidden
+%% pidsはServerName, topicsはLocalName
+%% down()が呼ばれたらetsのebus_ps_local_X（Topis）、ebus_pa_gc_X（Pids）テーブルから
+%% 該当Pidのvalueを削除
 handle_cast({down, Pid}, #{pids := Pids, topics := Topics} = State) ->
   try
+    %% e.g. ebus_ps_gc_1テーブルからPidを探す
+    %% keyにはtopicsのリストがvalueとして格納されていると思われる
     Topics0 = ets:lookup_element(Pids, Pid, 2),
+    %% e.g. ebus_ps_local_1テーブル（トピック管理テーブル？）から、
+    %% 該当Pidのtopicと該当pidのタプルを削除
     lists:foreach(fun(Topic) ->
       true = ets:match_delete(Topics, {Topic, {Pid, '_'}})
     end, Topics0),
+    %% e.g. ebus_ps_gc_1テーブル（Pidとトピックのひも付けテーブル？）から、
+    %% 該当Pidを削除
     true = ets:match_delete(Pids, {Pid, '_'})
   catch
     error:badarg -> badarg

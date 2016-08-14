@@ -54,6 +54,11 @@ start_link(Server, PoolSize, DispatchRules) ->
 init([Server, PoolSize, DispatchRules]) ->
   % Define a dispatch table so we don't have to go through
   % a bottleneck to get the instruction to perform.
+  % dispatch tablesを定義することによって
+  % 実行時のボトルネックに対処する必要がなくなる
+
+  %% etsにsubscribe情報を格納する
+  %% read が多いのでread_concurrencyをtrueにしているものと思われる
   Server = ets:new(Server, [set, named_table, {read_concurrency, true}]),
   true = ets:insert(Server, {subscribe, ebus_ps_local, [Server, PoolSize]}),
   true = ets:insert(Server, {unsubscribe, ebus_ps_local, [Server, PoolSize]}),
@@ -61,22 +66,30 @@ init([Server, PoolSize, DispatchRules]) ->
   true = ets:insert(Server, {list, ebus_ps_local, [Server, PoolSize]}),
   true = ets:insert(Server, DispatchRules),
 
+  %% Shardは数字。
   ChildrenFun = fun(Shard) ->
+    %% Shard=1なら、ebus_ps_local_1のようになる
     LocalShardName = ebus_ps_local:local_name(Server, Shard),
+    %% Shard=1なら、ebus_ps_gc_1のようになる
     GCShardName    = ebus_ps_local:gc_name(Server, Shard),
+    %% Shardテーブルに登録する
     true = ets:insert(Server, {Shard, {LocalShardName, GCShardName}}),
 
+    %% Shardのspecを作成する
     ShardChildren = [
       ebus_supervisor_spec:worker(ebus_ps_gc, [GCShardName, LocalShardName]),
       ebus_supervisor_spec:worker(ebus_ps_local, [LocalShardName, GCShardName])
     ],
 
+    %% Shardのspecは、ebus_supervisourの子プロセスとして使うようにして
+    %% supervisor specを生成
     ebus_supervisor_spec:supervisor(
       ebus_supervisor,
       [ShardChildren, #{strategy => one_for_all}],
       #{id => Shard}
     )
   end,
+  %% プールサイズ分Shard数をChildrenFunに渡す
   Children = [ChildrenFun(C) || C <- lists:seq(0, PoolSize - 1)],
 
   ebus_supervisor_spec:supervise(Children, #{strategy => one_for_one}).
